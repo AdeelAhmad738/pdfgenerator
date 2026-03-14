@@ -69,7 +69,6 @@ export const TaskProvider = ({ children }) => {
     enableTeamVisibility: true,
     compactView: false,
     showAvatars: false,
-  }
 
   const [preferences, setPreferences] = useState(defaultPreferences)
 
