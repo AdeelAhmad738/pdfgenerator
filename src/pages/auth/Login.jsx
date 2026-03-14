@@ -67,11 +67,11 @@ function Login() {
       <div className="auth-simple-card auth-simple-card--wide">
         <div className="auth-split">
           <div className="auth-split__side">
-            <div className="auth-simple-logo">TF</div>
+            <div className="auth-simple-logo">CTMS</div>
             <h1>Collaborative Task Management System</h1>
             <p>Plan, assign, and deliver with clarity across the team.</p>
             <ul className="auth-feature-list">
-              <li>Kanban workflow with live updates</li>
+              <li>Collaboration To Achieve Task</li>
               <li>Task assignment approvals</li>
               <li>PDF & Excel reporting</li>
             </ul>

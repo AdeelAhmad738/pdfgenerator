@@ -36,8 +36,8 @@ const Navbar = () => {
   return (
     <header className="navbar">
       <div className="navbar__brand">
-        <span className="navbar__logo">TF</span>
-        <span className="navbar__name">TaskFlow</span>
+        <span className="navbar__logo">CTMS</span>
+        <span className="navbar__name">Collaborative Task Management System</span>
       </div>
 
       <div className="navbar__search">

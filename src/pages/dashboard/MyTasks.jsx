@@ -5,16 +5,12 @@ import TaskForm from "../../components/TaskForm"
 import TaskCard from "../../components/TaskCard"
 import CommentForm from "../../components/CommentForm"
 import { jsPDF } from "jspdf"
-import * as XLSX from "xlsx"
 import { DragDropContext, Draggable, Droppable } from "react-beautiful-dnd"
 import {
   fetchViews,
   createView,
   deleteView as deleteViewInDb,
   fetchAttachments,
-  uploadAttachment,
-  deleteAttachment as deleteAttachmentInDb,
-  fetchActivity,
 } from "../../services/supabaseExtras"
 
 const statusOptions = [
@@ -56,10 +52,10 @@ const MyTasks = () => {
   const [sortMode, setSortMode] = useState("manual")
   const [savedViews, setSavedViews] = useState([])
   const [viewName, setViewName] = useState("")
+  const [showFullDescription, setShowFullDescription] = useState(false)
+  const [isDescriptionOverflowing, setIsDescriptionOverflowing] = useState(false)
   const [attachments, setAttachments] = useState([])
-  const [attachmentsLoading, setAttachmentsLoading] = useState(false)
-  const [activity, setActivity] = useState([])
-  const [activityLoading, setActivityLoading] = useState(false)
+  const descriptionRef = React.useRef(null)
 
   const currentTask = useMemo(() => {
     if (!taskId) return null
@@ -156,28 +152,30 @@ const MyTasks = () => {
   }, [])
 
   useEffect(() => {
-    if (!taskId) return
+    if (!taskId) {
+      setAttachments([])
+      return
+    }
+    setShowFullDescription(false)
     const loadAttachments = async () => {
-      setAttachmentsLoading(true)
       try {
         const data = await fetchAttachments(taskId)
-        setAttachments(data)
-      } catch { /* ignore */ } finally { setAttachmentsLoading(false) }
+        setAttachments(data || [])
+      } catch {
+        setAttachments([])
+      }
     }
     loadAttachments()
   }, [taskId])
 
   useEffect(() => {
-    if (!taskId) return
-    const loadActivity = async () => {
-      setActivityLoading(true)
-      try {
-        const data = await fetchActivity(taskId)
-        setActivity(data)
-      } catch { /* ignore */ } finally { setActivityLoading(false) }
-    }
-    loadActivity()
-  }, [taskId])
+    const el = descriptionRef.current
+    if (!el) return
+
+    // If the content is clamped by CSS, scrollHeight will be greater than clientHeight.
+    const isOverflowing = el.scrollHeight > el.clientHeight + 1
+    setIsDescriptionOverflowing(isOverflowing)
+  }, [currentTask?.description, showFullDescription])
 
   const formatDate = (value) => {
     if (!value) return "-"
@@ -229,49 +227,34 @@ const MyTasks = () => {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
+
   const handleSaveEdit = (taskId, values) => {
     updateTask(taskId, values)
     setEditingTask(null)
   }
 
-  const handleAttachmentUpload = async (event) => {
-    const file = event.target.files?.[0]
-    if (!file || !currentTask) return
-    try {
-      const saved = await uploadAttachment({ taskId: currentTask.id, file })
-      if (saved) setAttachments((c) => [saved, ...c])
-    } catch { /* ignore */ }
-  }
-
-  const exportTaskPdf = (task) => {
+  const exportTaskPdf = (task, openInNewTab = false) => {
     const status = normalizeStatus(task.status)
-    const doc = new jsPDF()
-    doc.setFontSize(16)
-    doc.text("Task Summary", 14, 18)
-    doc.setFontSize(11)
-    doc.text(`Title: ${task.title}`, 14, 30)
-    doc.text(`Status: ${status}`, 14, 38)
-    doc.text(`Assigned To: ${task.assignedTo || task.assigned_to_email || "Unassigned"}`, 14, 46)
-    doc.text(`Priority: ${task.priority || "medium"}`, 14, 54)
-    doc.text(`Due Date: ${formatDate(task.deadline)}`, 14, 62)
-    doc.text("Description:", 14, 74)
-    doc.text(task.description || "No description provided.", 14, 82)
-    doc.save(`task-${task.id}.pdf`)
-  }
+    const doc = new jsPDF({ unit: "pt", format: "letter" })
+    doc.setFontSize(18)
+    doc.text("Task Summary", 40, 60)
+    doc.setFontSize(12)
+    doc.text(`Title: ${task.title}`, 40, 90)
+    doc.text(`Status: ${status}`, 40, 110)
+    doc.text(`Assigned To: ${task.assignedTo || task.assigned_to_email || "Unassigned"}`, 40, 130)
+    doc.text(`Priority: ${task.priority || "medium"}`, 40, 150)
+    doc.text(`Due Date: ${task.deadline ? new Date(task.deadline).toLocaleDateString() : "No due date"}`, 40, 170)
+    doc.text("Description:", 40, 200)
+    const description = task.description || "No description provided."
+    const splitLines = doc.splitTextToSize(description, 520)
+    doc.text(splitLines, 40, 220)
 
-  const exportTaskExcel = (task) => {
-    const row = [{
-      Title: task.title,
-      Description: task.description,
-      Status: normalizeStatus(task.status),
-      AssignedTo: task.assignedTo || task.assigned_to_email || "Unassigned",
-      Priority: task.priority || "medium",
-      DueDate: formatDate(task.deadline),
-    }]
-    const worksheet = XLSX.utils.json_to_sheet(row)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Task")
-    XLSX.writeFile(workbook, `task-${task.id}.xlsx`)
+    if (openInNewTab) {
+      const url = doc.output("bloburl")
+      window.open(url, "_blank")
+      return
+    }
+    doc.save(`task-${task.id}.pdf`)
   }
 
   // ── Task Detail View ──
@@ -299,7 +282,19 @@ const MyTasks = () => {
           </div>
           <div className="page-actions">
             <button className="button button--ghost" onClick={() => navigate("/dashboard/tasks")}>
-              ← Back to Kanban
+              ← Back to Tasks
+            </button>
+            <button
+              className="button button--ghost"
+              onClick={() => toggleTaskComplete(currentTask.id)}
+            >
+              {normalizeStatus(currentTask.status) === "completed" ? "Mark Pending" : "Mark Done"}
+            </button>
+            <button className="button button--ghost" onClick={() => exportTaskPdf(currentTask, true)}>
+              Open PDF
+            </button>
+            <button className="button button--ghost" onClick={() => exportTaskPdf(currentTask)}>
+              Download PDF
             </button>
             <button className="button" onClick={() => handleEdit(currentTask)}>
               Edit Task
@@ -318,72 +313,76 @@ const MyTasks = () => {
         />
 
         <section className="dashboard__panel">
-          <div className="dashboard__panel-header">
-            <h3>Task Exports</h3>
-            <div className="page-actions">
-              <button className="button button--ghost" type="button" onClick={() => exportTaskPdf(currentTask)}>Export PDF</button>
-              <button className="button button--ghost" type="button" onClick={() => exportTaskExcel(currentTask)}>Export Excel</button>
+          <h3>Task Details</h3>
+          <div className="task-details">
+            <div className="task-details__row">
+              <span className="task-details__label">Assigned To</span>
+              <span className="task-details__value">{currentTask.assignedTo || currentTask.assigned_to_email || "Unassigned"}</span>
+            </div>
+            <div className="task-details__row">
+              <span className="task-details__label">Due Date</span>
+              <span className="task-details__value">{currentTask.deadline ? new Date(currentTask.deadline).toLocaleDateString() : "No due date"}</span>
+            </div>
+            <div className="task-details__row">
+              <span className="task-details__label">Priority</span>
+              <span className="task-details__value">{currentTask.priority || "Medium"}</span>
+            </div>
+            <div className="task-details__row">
+              <span className="task-details__label">Status</span>
+              <span className="task-details__value">{currentTask.status}</span>
+            </div>
+            <div className="task-details__row">
+              <span className="task-details__label">Description</span>
+              <span className="task-details__value task-details__description">
+                {currentTask.description ? (
+                  <span
+                    ref={descriptionRef}
+                    className={showFullDescription ? "" : "description-truncate"}
+                    onClick={() => isDescriptionOverflowing && setShowFullDescription((p) => !p)}
+                    style={{ cursor: isDescriptionOverflowing ? 'pointer' : 'default' }}
+                  >
+                    {currentTask.description}
+                    {isDescriptionOverflowing && (
+                      <span className="see-more-indicator">
+                        {showFullDescription ? "... Show less" : "... See more"}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  "No description provided."
+                )}
+              </span>
             </div>
           </div>
-          <p className="small-text">Generate a report for this task only.</p>
         </section>
 
-        <section className="dashboard__panel">
-          <div className="dashboard__panel-header">
+        {attachments.length > 0 && (
+          <section className="dashboard__panel">
             <h3>Attachments</h3>
-            <label className="button button--ghost button--small">
-              Upload PDF or Excel
-              <input type="file" accept=".pdf,.xlsx,.xls" onChange={handleAttachmentUpload} style={{ display: "none" }} />
-            </label>
-          </div>
-          {attachmentsLoading ? (
-            <p className="small-text">Loading attachments...</p>
-          ) : attachments.length ? (
-            <div className="activity-list">
+            <div className="attachment-list">
               {attachments.map((file) => (
-                <div key={file.id} className="activity-item">
-                  <div className="activity-item__meta">
-                    <span>{file.name}</span>
-                    <span>{Math.round(file.size / 1024)} KB</span>
+                <div key={file.id} className="attachment-item">
+                  <div className="attachment-info">
+                    <span className="attachment-name">{file.name}</span>
+                    <span className="attachment-size">({(file.size / 1024).toFixed(2)} KB)</span>
                   </div>
-                  <div className="task-tags">
-                    <a className="link-button" href={file.url} target="_blank" rel="noreferrer">View</a>
-                    <a className="link-button" href={file.url} download={file.name}>Download</a>
-                    <button className="link-button link-button--danger" type="button" onClick={async () => {
-                      await deleteAttachmentInDb(file)
-                      setAttachments((c) => c.filter((item) => item.id !== file.id))
-                    }}>Delete</button>
+                  <div className="attachment-actions">
+                    {file.url && (
+                      <>
+                        <a href={file.url} target="_blank" rel="noopener noreferrer" className="button button--ghost button--small">
+                          View
+                        </a>
+                        <a href={file.url} download={file.name} className="button button--ghost button--small">
+                          Download
+                        </a>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
-          ) : (
-            <p className="small-text">No attachments yet. Upload PDFs or Excel files.</p>
-          )}
-        </section>
-
-        <section className="dashboard__panel">
-          <div className="dashboard__panel-header"><h3>Activity Log</h3></div>
-          {activityLoading ? (
-            <p className="small-text">Loading activity...</p>
-          ) : activity.length ? (
-            <div className="activity-list">
-              {activity.map((entry) => (
-                <div key={entry.id} className="activity-item">
-                  <div className="activity-item__meta">
-                    <span>{entry.action}</span>
-                    <span>{new Date(entry.created_at).toLocaleString()}</span>
-                  </div>
-                  <strong>{entry.actor_email || "User"}</strong>
-                  {entry.details?.status && <p className="small-text">Status: {entry.details.status}</p>}
-                  {entry.details?.fields && <p className="small-text">Updated: {entry.details.fields.join(", ")}</p>}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="small-text">No activity recorded yet.</p>
-          )}
-        </section>
+          </section>
+        )}
 
         {editingTask && editingTask.id === currentTask.id && (
           <section className="task-edit">

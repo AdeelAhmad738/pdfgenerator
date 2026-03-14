@@ -9,6 +9,7 @@ const TaskForm = ({
   assigneeSuggestions = [],
   submitLabel = "Save task",
   hideSubmit = false,
+  renderFormWrapper = true,
 }) => {
   const [title, setTitle] = useState(initialValues.title || "")
   const [description, setDescription] = useState(initialValues.description || "")
@@ -79,8 +80,8 @@ const TaskForm = ({
     })
   }
 
-  return (
-    <form className="task-form" onSubmit={handleSubmit}>
+  const formContent = (
+    <>
       <div className="form-group">
         <label htmlFor="task-title">Title</label>
         <input
@@ -193,7 +194,6 @@ const TaskForm = ({
         </select>
       </div>
 
-
       <label className="auth-checkbox" style={{ marginBottom: "1rem" }}>
         <input
           type="checkbox"
@@ -217,6 +217,16 @@ const TaskForm = ({
           )}
         </div>
       )}
+    </>
+  )
+
+  if (!renderFormWrapper) {
+    return formContent
+  }
+
+  return (
+    <form className="task-form" onSubmit={handleSubmit}>
+      {formContent}
     </form>
   )
 }

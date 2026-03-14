@@ -2,14 +2,17 @@ import React, { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTasks } from "../../context/TaskContext"
 import TaskForm from "../../components/TaskForm"
+import { uploadAttachment } from "../../services/supabaseExtras"
 
 export default function CreateTask() {
   const navigate = useNavigate()
-  const { tasks, addTask } = useTasks()
+  const { tasks, addTask, currentUserId } = useTasks()
   const [draft, setDraft] = useState({})
   const [attachments, setAttachments] = useState([])
   const [dragActive, setDragActive] = useState(false)
   const [savedAt, setSavedAt] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
 
   // Teammate suggestions
   const assigneeSuggestions = useMemo(() => {
@@ -21,10 +24,14 @@ export default function CreateTask() {
     return Array.from(emails)
   }, [tasks])
 
+  // Get user-specific storage key
+  const draftStorageKey = `task_draft_${currentUserId}`
+
   // Load draft on mount
   useEffect(() => {
+    if (!currentUserId) return
     try {
-      const stored = localStorage.getItem("task_draft")
+      const stored = localStorage.getItem(draftStorageKey)
       if (stored) {
         const parsed = JSON.parse(stored)
         setDraft(parsed)
@@ -33,14 +40,15 @@ export default function CreateTask() {
     } catch {
       // ignore
     }
-  }, [])
+  }, [currentUserId, draftStorageKey])
 
   // Autosave draft
   const handleDraftChange = (values) => {
     const nextDraft = { ...draft, ...values }
     setDraft(nextDraft)
+    if (!currentUserId) return
     try {
-      localStorage.setItem("task_draft", JSON.stringify(nextDraft))
+      localStorage.setItem(draftStorageKey, JSON.stringify(nextDraft))
       setSavedAt(new Date().toLocaleTimeString())
     } catch {
       // ignore
@@ -76,12 +84,29 @@ export default function CreateTask() {
   // Submit task
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setLoading(true)
+    setError("")
+
+    if (!draft.title || !draft.title.trim()) {
+      setError("A task title is required.")
+      setLoading(false)
+      return
+    }
+
     try {
-      await addTask(draft)
-      localStorage.removeItem("task_draft")
+      const newTask = await addTask(draft)
+      if (attachments.length > 0) {
+        for (const file of attachments) {
+          await uploadAttachment({ taskId: newTask.id, file })
+        }
+      }
+      localStorage.removeItem(draftStorageKey)
       navigate("/dashboard/tasks")
     } catch (error) {
       console.error("Task creation failed", error)
+      setError("Failed to create task. Please try again.")
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -91,7 +116,7 @@ export default function CreateTask() {
     setAttachments([])
     setSavedAt("")
     try {
-      localStorage.removeItem("task_draft")
+      localStorage.removeItem(draftStorageKey)
     } catch {}
   }
 
@@ -118,6 +143,7 @@ export default function CreateTask() {
               statusControl="buttons"
               assigneeSuggestions={assigneeSuggestions}
               hideSubmit
+              renderFormWrapper={false}
             />
 
             {/* File Upload */}
@@ -148,18 +174,19 @@ export default function CreateTask() {
                         Remove
                       </button>
                     </div>
-                    
                   ))}
                 </div>
               )}
-               <button
-          type="button"
-          className="button button--primary button--large"
-          onClick={handleSubmit}
-        >
-          Create Task
-        </button>
+              {error && <div className="alert alert--error">{error}</div>}
             </div>
+
+            <button
+              type="submit"
+              className="button button--primary button--large"
+              disabled={loading}
+            >
+              {loading ? "Creating..." : "Create Task"}
+            </button>
           </form>
         </section>
 
