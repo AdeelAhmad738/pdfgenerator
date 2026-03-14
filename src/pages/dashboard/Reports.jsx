@@ -19,7 +19,7 @@ return status
 }
 
 const openTask = (taskId) => {
-navigate(`/tasks/${taskId}`)
+navigate(`/dashboard/tasks/${taskId}`)
 }
 
 const setTodayFilter = () => {

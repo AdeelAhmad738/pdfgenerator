@@ -224,7 +224,7 @@ function Profile() {
             <button className="button button--primary" onClick={() => navigate("/dashboard/tasks")}>
               View All Tasks
             </button>
-            <button className="button button--ghost" onClick={() => navigate("/dashboard/create-task")}>
+            <button className="button button--ghost" onClick={() => navigate("/dashboard/create")}>
               New Task
             </button>
           </div>
