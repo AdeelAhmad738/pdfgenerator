@@ -94,7 +94,6 @@ export const TaskProvider = ({ children }) => {
     }
     // Always keep light mode enabled
     document.documentElement.classList.remove('dark-mode')
-  }, [currentUserId])
 
   // Save preferences to user-specific storage
   useEffect(() => {
