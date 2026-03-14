@@ -20,7 +20,6 @@ import {
   markNotificationRead as markNotificationReadInDb,
   markAllNotificationsRead as markAllNotificationsReadInDb,
   sendInviteEmail,
-  createNotificationForUser,
 } from "../services/supabaseExtras"
 import { migrateLocalDataOnce } from "../services/migration"
 
