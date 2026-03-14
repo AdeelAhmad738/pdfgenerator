@@ -46,8 +46,9 @@ export const TaskProvider = ({ children }) => {
 
   const [notifications, setNotifications] = useState([])
   const [invites, setInvites] = useState([])
-  // Default preferences
-  const defaultPreferences = {
+  
+  // Default preferences - memoized to avoid dependency array issues
+  const defaultPreferences = useMemo(() => ({
     autoAssignDueDates: true,
     showCompletedTasks: true,
     autoRestoreDrafts: true,
@@ -69,6 +70,7 @@ export const TaskProvider = ({ children }) => {
     enableTeamVisibility: true,
     compactView: false,
     showAvatars: false,
+  }), [])
 
   const [preferences, setPreferences] = useState(defaultPreferences)
 
@@ -93,6 +95,7 @@ export const TaskProvider = ({ children }) => {
     }
     // Always keep light mode enabled
     document.documentElement.classList.remove('dark-mode')
+  }, [currentUserId, defaultPreferences])
 
   // Save preferences to user-specific storage
   useEffect(() => {
