@@ -11,6 +11,7 @@ import {
   createView,
   deleteView as deleteViewInDb,
   fetchAttachments,
+  fetchActivity,
 } from "../../services/supabaseExtras"
 
 const statusOptions = [
@@ -41,7 +42,7 @@ const normalizeStatus = (status) => {
 const MyTasks = () => {
   const navigate = useNavigate()
   const { taskId } = useParams()
-  const { tasks, deleteTask, updateTask, toggleTaskComplete, addComment, currentUserEmail, preferences } = useTasks()
+  const { tasks, deleteTask, updateTask, toggleTaskComplete, addComment, respondToInvite, invites, currentUserEmail, currentUserId, preferences } = useTasks()
 
   const [statusFilter, setStatusFilter] = useState("all")
   const [assignedFilter, setAssignedFilter] = useState("all")
@@ -55,6 +56,8 @@ const MyTasks = () => {
   const [showFullDescription, setShowFullDescription] = useState(false)
   const [isDescriptionOverflowing, setIsDescriptionOverflowing] = useState(false)
   const [attachments, setAttachments] = useState([])
+  const [activity, setActivity] = useState([])
+  const [loadingActivity, setLoadingActivity] = useState(false)
   const descriptionRef = React.useRef(null)
 
   const currentTask = useMemo(() => {
@@ -154,6 +157,7 @@ const MyTasks = () => {
   useEffect(() => {
     if (!taskId) {
       setAttachments([])
+      setActivity([])
       return
     }
     setShowFullDescription(false)
@@ -165,7 +169,19 @@ const MyTasks = () => {
         setAttachments([])
       }
     }
+    const loadActivity = async () => {
+      setLoadingActivity(true)
+      try {
+        const data = await fetchActivity(taskId)
+        setActivity(data || [])
+      } catch {
+        setActivity([])
+      } finally {
+        setLoadingActivity(false)
+      }
+    }
     loadAttachments()
+    loadActivity()
   }, [taskId])
 
   useEffect(() => {
@@ -312,6 +328,42 @@ const MyTasks = () => {
           compact
         />
 
+        {/* Pending Invite Alert */}
+        {currentTask && (() => {
+          const pendingInvite = invites.find(
+            (i) =>
+              i.task_id === taskId &&
+              (i.to_email || i.email || "").toLowerCase() === (currentUserEmail || "").toLowerCase() &&
+              i.status === "pending"
+          )
+          return pendingInvite ? (
+            <section className="dashboard__panel" style={{ background: "rgba(59, 130, 246, 0.1)", borderColor: "rgba(59, 130, 246, 0.3)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h4 style={{ margin: "0 0 4px 0" }}>📌 Task Assignment</h4>
+                  <p style={{ margin: "0", color: "#64748b", fontSize: "14px" }}>
+                    {currentTask.created_by_email || "Your teammate"} assigned you this task
+                  </p>
+                </div>
+                <div className="task-tags">
+                  <button
+                    className="button button--small"
+                    onClick={() => respondToInvite(pendingInvite, "accepted")}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    className="button button--ghost button--small"
+                    onClick={() => respondToInvite(pendingInvite, "declined")}
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            </section>
+          ) : null
+        })()}
+
         <section className="dashboard__panel">
           <h3>Task Details</h3>
           <div className="task-details">
@@ -354,6 +406,46 @@ const MyTasks = () => {
               </span>
             </div>
           </div>
+        </section>
+
+        {/* Activity Feed */}
+        <section className="dashboard__panel">
+          <h3>Activity</h3>
+          {loadingActivity ? (
+            <p style={{ color: "#94a3b8" }}>Loading activity...</p>
+          ) : activity.length === 0 ? (
+            <p style={{ color: "#94a3b8" }}>No activity yet</p>
+          ) : (
+            <div className="task-list">
+              {activity.map((log) => {
+                const formatTime = (val) => {
+                  if (!val) return "-"
+                  const date = new Date(val)
+                  if (Number.isNaN(date.getTime())) return "-"
+                  const diff = Date.now() - date.getTime()
+                  if (diff < 60000) return "Just now"
+                  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+                  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+                  return date.toLocaleDateString()
+                }
+                return (
+                  <div key={log.id} className="activity-item">
+                    <div>
+                      <strong>{log.action}</strong>
+                      <p className="small-text">
+                        by {log.actor_email || "System"} · {formatTime(log.created_at)}
+                      </p>
+                      {log.details && Object.keys(log.details).length > 0 && (
+                        <small style={{ color: "#94a3b8", display: "block", marginTop: "4px" }}>
+                          {JSON.stringify(log.details).substring(0, 100)}
+                        </small>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         {attachments.length > 0 && (

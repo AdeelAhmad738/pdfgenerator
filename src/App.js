@@ -13,6 +13,7 @@ import Settings from "./pages/dashboard/Settings"
 import Collaboration from "./pages/dashboard/Collaboration"
 import Profile from "./pages/profile/Profile"
 import Notifications from "./pages/notifications/Notifications"
+import TaskDetail from "./pages/dashboard/TaskDetail"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { TaskProvider } from "./context/TaskContext"
 
@@ -38,6 +39,7 @@ function App() {
             <Route path="create" element={<CreateTask />} />
             <Route path="tasks" element={<MyTasks />} />
             <Route path="tasks/:taskId" element={<MyTasks />} />
+            <Route path="task/:id" element={<TaskDetail />} />
             <Route path="team" element={<TeamTasks />} />
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />

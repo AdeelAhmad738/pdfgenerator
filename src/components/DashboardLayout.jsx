@@ -1,13 +1,15 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
-import { useMemo, useEffect } from "react"
+import { useMemo, useEffect, useState } from "react"
 import { supabase } from "../services/supabaseClient"
 import Navbar from "./Navbar"
 import Sidebar from "./Sidebar"
 import { useTasks } from "../context/TaskContext"
 
+
 const DashboardLayout = () => {
   const navigate = useNavigate()
   const { invites, currentUserEmail, preferences } = useTasks()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   useEffect(() => {
     if (preferences.darkMode) {
@@ -16,6 +18,18 @@ const DashboardLayout = () => {
       document.body.classList.remove('dark-mode')
     }
   }, [preferences.darkMode])
+
+  useEffect(() => {
+    const handleEscKey = (e) => {
+      if (e.key === 'Escape') {
+        setMobileMenuOpen(false)
+      }
+    }
+    if (mobileMenuOpen) {
+      document.addEventListener('keydown', handleEscKey)
+    }
+    return () => document.removeEventListener('keydown', handleEscKey)
+  }, [mobileMenuOpen])
 
   const pendingInviteCount = useMemo(() => {
     const email = (currentUserEmail || "").toLowerCase()
@@ -69,50 +83,73 @@ const DashboardLayout = () => {
       label: "Profile",
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21c0-4.4-3.6-8-8-8s-8 3.6-8 8"/><circle cx="12" cy="7" r="4"/></svg>,
     },
+    {
+      action: handleSignOut,
+      label: "Sign Out",
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>,
+      isSignOut: true,
+    },
   ]
 
-  const renderLink = (link) => (
-    <NavLink
-      key={link.to}
-      to={link.to}
-      end={link.to === "/dashboard"}
-      className={({ isActive }) => `sidebar__link ${isActive ? "sidebar__link--active" : ""}`}
-    >
-      <span className="sidebar__link-content">
-        <span className="sidebar__link-icon">{link.icon}</span>
-        <span>{link.label}</span>
-      </span>
-      {link.badge > 0 && <span className="sidebar__badge">{link.badge > 9 ? "9+" : link.badge}</span>}
-    </NavLink>
-  )
+  const renderLink = (link) => {
+    if (link.isSignOut) {
+      return (
+        <button
+          key={link.label}
+          className="sidebar__link sidebar__link--signout"
+          onClick={() => {
+            handleSignOut()
+            setMobileMenuOpen(false)
+          }}
+          type="button"
+        >
+          <span className="sidebar__link-content">
+            <span className="sidebar__link-icon">{link.icon}</span>
+            <span>{link.label}</span>
+          </span>
+        </button>
+      )
+    }
+
+    return (
+      <NavLink
+        key={link.to}
+        to={link.to}
+        end={link.to === "/dashboard"}
+        className={({ isActive }) => `sidebar__link ${isActive ? "sidebar__link--active" : ""}`}
+        onClick={() => setMobileMenuOpen(false)}
+      >
+        <span className="sidebar__link-content">
+          <span className="sidebar__link-icon">{link.icon}</span>
+          <span>{link.label}</span>
+        </span>
+        {link.badge > 0 && <span className="sidebar__badge">{link.badge > 9 ? "9+" : link.badge}</span>}
+      </NavLink>
+    )
+  }
 
   return (
     <div className="app">
-      <Navbar />
+      <Navbar 
+        mobileMenuOpen={mobileMenuOpen} 
+        toggleMobileMenu={() => setMobileMenuOpen(!mobileMenuOpen)} 
+      />
       <div className="layout">
-        <Sidebar>
+        <Sidebar className={mobileMenuOpen ? "sidebar--mobile-open" : ""}>
           <div className="sidebar__section-title">Main</div>
           <nav className="sidebar__nav">{mainLinks.map(renderLink)}</nav>
+          <div className="sidebar__divider"></div>
           <div className="sidebar__section-title">Workspace</div>
           <nav className="sidebar__nav">{workspaceLinks.map(renderLink)}</nav>
-          <div className="sidebar__footer">
-            <button className="sidebar__logout" type="button" onClick={handleSignOut}>
-              <span className="sidebar__link-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>
-                </svg>
-              </span>
-              Sign out
-            </button>
-          </div>
         </Sidebar>
+        {mobileMenuOpen && <div className="layout__overlay" onClick={() => setMobileMenuOpen(false)}></div>}
         <main className="main">
           <Outlet />
         </main>
       </div>
     </div>
   )
+
 }
 
 export default DashboardLayout

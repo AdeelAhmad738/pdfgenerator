@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTasks } from "../context/TaskContext"
 
-const Navbar = () => {
+const Navbar = ({ mobileMenuOpen, toggleMobileMenu }) => {
   const navigate = useNavigate()
   const { notifications, invites, currentUserEmail, currentUserName } = useTasks()
   const [searchQuery, setSearchQuery] = useState("")
@@ -35,6 +35,28 @@ const Navbar = () => {
 
   return (
     <header className="navbar">
+      <button
+        className={`navbar__menu-toggle ${mobileMenuOpen ? "navbar__menu-toggle--active" : ""}`}
+        type="button"
+        onClick={toggleMobileMenu}
+        aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+        aria-expanded={mobileMenuOpen}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          {mobileMenuOpen ? (
+            <>
+              <path d="M18 6L6 18" />
+              <path d="M6 6l12 12" />
+            </>
+          ) : (
+            <>
+              <path d="M3 6h18" />
+              <path d="M3 12h18" />
+              <path d="M3 18h18" />
+            </>
+          )}
+        </svg>
+      </button>
       <div className="navbar__brand">
         <span className="navbar__logo">CTMS</span>
         <span className="navbar__name">Collaborative Task Management System</span>

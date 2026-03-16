@@ -281,13 +281,25 @@ export const deleteAttachment = async (attachment) => {
 
 export const sendInviteEmail = async (payload) => {
   const endpoint = process.env.REACT_APP_INVITE_FUNCTION_URL
-  if (!endpoint) return false
-  await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  return true
+  if (!endpoint) {
+    console.warn("[Email] No email endpoint configured")
+    return false
+  }
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      console.warn(`[Email] Send failed with status ${response.status}`)
+      return false
+    }
+    return true
+  } catch (error) {
+    console.warn("[Email] Send error:", error.message)
+    return false
+  }
 }
 
 export const fetchNotifications = async () => {

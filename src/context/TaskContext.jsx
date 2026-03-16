@@ -242,11 +242,12 @@ export const TaskProvider = ({ children }) => {
     [isDbReady]
   )
 
-  // Realtime subscription — only when DB is ready
+  // Realtime subscription — tasks and notifications
   useEffect(() => {
     if (!isDbReady || !currentUserId) return
 
-    const channel = supabase
+    // Subscribe to tasks changes
+    const tasksChannel = supabase
       .channel("tasks-realtime")
       .on(
         "postgres_changes",
@@ -291,8 +292,22 @@ export const TaskProvider = ({ children }) => {
       )
       .subscribe()
 
+    // Subscribe to notifications for current user
+    const notificationsChannel = supabase
+      .channel(`notifications-${currentUserId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "task_notifications", filter: `user_id=eq.${currentUserId}` },
+        (payload) => {
+          const newNotification = payload.new
+          setNotifications((current) => [newNotification, ...current])
+        }
+      )
+      .subscribe()
+
     return () => {
-      supabase.removeChannel(channel)
+      supabase.removeChannel(tasksChannel)
+      supabase.removeChannel(notificationsChannel)
     }
   }, [addNotification, currentUserEmail, currentUserId, isDbReady, normalizeTask])
 

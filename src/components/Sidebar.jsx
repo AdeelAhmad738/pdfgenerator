@@ -1,7 +1,7 @@
 import React from "react"
 
-const Sidebar = ({ children }) => {
-  return <aside className="sidebar">{children}</aside>
+const Sidebar = ({ children, className = "" }) => {
+  return <aside className={`sidebar ${className}`}>{children}</aside>
 }
 
 export default Sidebar

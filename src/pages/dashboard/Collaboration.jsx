@@ -94,6 +94,22 @@ return(
 </div>
 </div>
 
+{/* Collaboration Stats */}
+<div className="dashboard__stats" style={{marginBottom:"1.5rem"}}>
+<div className="stat-card">
+<h4>Pending Invites</h4>
+<strong style={{fontSize:"28px", color:"#3b82f6"}}>{pendingIncoming.length}</strong>
+</div>
+<div className="stat-card">
+<h4>Sent Invites</h4>
+<strong style={{fontSize:"28px", color:"#f59e0b"}}>{sentInvites.filter(i=>i.status==="pending").length}</strong>
+</div>
+<div className="stat-card">
+<h4>Active Collaborators</h4>
+<strong style={{fontSize:"28px", color:"#10b981"}}>{workload.length}</strong>
+</div>
+</div>
+
 
 {/* Workload summary */}
 
@@ -136,19 +152,27 @@ return(
 
 {pendingIncoming.map(invite=>(
 
-<div key={invite.id} className="activity-item">
+<div key={invite.id} className="activity-item" style={{background:"rgba(59, 130, 246, 0.05)", padding:"12px", borderRadius:"8px", borderLeft:"3px solid #3b82f6"}}>
 
-<div>
+<div style={{marginBottom:"8px"}}>
 
-<strong>
+<strong style={{fontSize:"16px"}}>
 {invite.invite_type==="task"
-?`Task: ${invite.task_title || "Untitled"}`
-:"Collaboration Invite"}
+?`📌 Task: ${invite.task_title || "Untitled"}`
+:"🤝 Collaboration Invite"}
 </strong>
 
-<p className="small-text">
-From {invite.from_email || "Teammate"}
+<p className="small-text" style={{marginTop:"4px"}}>
+From <strong>{invite.from_email || "Teammate"}</strong>
+{invite.task_priority && ` · Priority: ${invite.task_priority}`}
+{invite.task_deadline && ` · Due: ${new Date(invite.task_deadline).toLocaleDateString()}`}
 </p>
+
+{invite.task_description && (
+<p className="small-text" style={{marginTop:"6px", color:"#64748b"}}>
+{invite.task_description}
+</p>
+)}
 
 </div>
 
@@ -157,15 +181,16 @@ From {invite.from_email || "Teammate"}
 <button
 className="button button--small"
 onClick={()=>respondToInvite(invite,"accepted")}
+style={{background:"#10b981", border:"none"}}
 >
-Accept
+✓ Accept
 </button>
 
 <button
 className="button button--ghost button--small"
 onClick={()=>respondToInvite(invite,"declined")}
 >
-Decline
+✕ Decline
 </button>
 
 </div>
