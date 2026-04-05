@@ -20,13 +20,46 @@ import {
   markNotificationRead as markNotificationReadInDb,
   markAllNotificationsRead as markAllNotificationsReadInDb,
   sendInviteEmail,
+  assignTask,
+  acceptTaskAssignment,
+  declineTaskAssignment,
+  unassignTask,
 } from "../services/supabaseExtras"
 import { migrateLocalDataOnce } from "../services/migration"
+
+export const DEFAULT_PREFERENCES = {
+  autoAssignDueDates: true,
+  showCompletedTasks: true,
+  autoRestoreDrafts: true,
+  emailAlerts: true,
+  dailySummary: false,
+  enableTaskPriority: true,
+  preventDuplicateTasks: false,
+  confirmDelete: true,
+  confirmTaskCompletion: false,
+  showProductivityStats: true,
+  showOverdueTasks: true,
+  showRecentActivity: true,
+  includeCompletedInReports: false,
+  includePriorityInReports: true,
+  enableQuickExport: true,
+  notifyOnAssign: true,
+  notifyOnDeadline: true,
+  notifyOnComments: true,
+  enableTeamVisibility: true,
+  compactView: false,
+  showAvatars: false,
+}
 
 const TaskContext = createContext(null)
 
 const generateId = () => {
   return uuidv4()
+}
+
+const getTaskStorageKey = (userId) => {
+  if (!userId) return "task_manager_tasks_guest"
+  return `task_manager_tasks_${userId}`
 }
 
 export const TaskProvider = ({ children }) => {
@@ -47,38 +80,13 @@ export const TaskProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([])
   const [invites, setInvites] = useState([])
   
-  // Default preferences - memoized to avoid dependency array issues
-  const defaultPreferences = useMemo(() => ({
-    autoAssignDueDates: true,
-    showCompletedTasks: true,
-    autoRestoreDrafts: true,
-    emailAlerts: true,
-    dailySummary: false,
-    enableTaskPriority: true,
-    preventDuplicateTasks: false,
-    confirmDelete: true,
-    confirmTaskCompletion: false,
-    showProductivityStats: true,
-    showOverdueTasks: true,
-    showRecentActivity: true,
-    includeCompletedInReports: false,
-    includePriorityInReports: true,
-    enableQuickExport: true,
-    notifyOnAssign: true,
-    notifyOnDeadline: true,
-    notifyOnComments: true,
-    enableTeamVisibility: true,
-    compactView: false,
-    showAvatars: false,
-  }), [])
-
-  const [preferences, setPreferences] = useState(defaultPreferences)
+  const [preferences, setPreferences] = useState(() => ({ ...DEFAULT_PREFERENCES }))
 
   // Load preferences when user changes
   useEffect(() => {
     if (!currentUserId) {
-      setPreferences(defaultPreferences)
-      document.documentElement.classList.remove('dark-mode')
+      setPreferences({ ...DEFAULT_PREFERENCES })
+      document.documentElement.classList.remove("dark-mode")
       return
     }
     try {
@@ -88,14 +96,13 @@ export const TaskProvider = ({ children }) => {
         const prefs = JSON.parse(stored)
         setPreferences(prefs)
       } else {
-        setPreferences(defaultPreferences)
+        setPreferences({ ...DEFAULT_PREFERENCES })
       }
     } catch {
-      setPreferences(defaultPreferences)
+      setPreferences({ ...DEFAULT_PREFERENCES })
     }
-    // Always keep light mode enabled
-    document.documentElement.classList.remove('dark-mode')
-  }, [currentUserId, defaultPreferences])
+    document.documentElement.classList.remove("dark-mode")
+  }, [currentUserId])
 
   // Save preferences to user-specific storage
   useEffect(() => {
@@ -161,13 +168,50 @@ export const TaskProvider = ({ children }) => {
   // Load the authenticated user
   useEffect(() => {
     const loadUser = async () => {
-      const { data } = await supabase.auth.getUser()
-      setCurrentUserId(data?.user?.id || "")
-      setCurrentUserEmail(data?.user?.email || "")
-      setCurrentUserName(data?.user?.user_metadata?.full_name || "")
+      try {
+        const { data } = await supabase.auth.getUser()
+        setCurrentUserId(data?.user?.id || "")
+        setCurrentUserEmail(data?.user?.email || "")
+        setCurrentUserName(data?.user?.user_metadata?.full_name || "")
+      } catch (error) {
+        console.warn("[TaskContext] Failed to load user", error?.message || error)
+        setCurrentUserId("")
+        setCurrentUserEmail("")
+        setCurrentUserName("")
+      }
     }
     loadUser()
   }, [])
+
+  // Hydrate cached tasks so offline loads still show the last synced state
+  useEffect(() => {
+    if (!currentUserId) {
+      setTasks([])
+      return
+    }
+
+    try {
+      const saved = localStorage.getItem(getTaskStorageKey(currentUserId))
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed)) {
+          setTasks(parsed)
+        }
+      }
+    } catch (error) {
+      console.warn("[TaskContext] Failed to load cached tasks", error?.message || error)
+    }
+  }, [currentUserId])
+
+  // Persist tasks locally so the UI survives offline refreshes
+  useEffect(() => {
+    if (!currentUserId) return
+    try {
+      localStorage.setItem(getTaskStorageKey(currentUserId), JSON.stringify(tasks))
+    } catch (error) {
+      console.warn("[TaskContext] Failed to cache tasks", error?.message || error)
+    }
+  }, [currentUserId, tasks])
 
   // Test DB connectivity once user is available — probe the tasks table
   useEffect(() => {
@@ -339,6 +383,56 @@ export const TaskProvider = ({ children }) => {
     loadInvites()
   }, [currentUserId, isDbReady])
 
+  // Keep invites in sync with real-time inserts/updates for assignments and collaboration invites
+  useEffect(() => {
+    if (!isDbReady || !currentUserId) return
+
+    const normalizedEmail = (currentUserEmail || "").trim().toLowerCase()
+
+    const upsertInvite = (payload) => {
+      const entry = payload.new || payload.old
+      if (!entry) return
+      setInvites((current) => {
+        if (payload.eventType === "DELETE") {
+          return current.filter((invite) => invite.id !== entry.id)
+        }
+        if (payload.eventType === "INSERT") {
+          return [entry, ...current.filter((invite) => invite.id !== entry.id)]
+        }
+        return current.map((invite) => (invite.id === entry.id ? entry : invite))
+      })
+    }
+
+    const channel = supabase.channel(`task-invites-${currentUserId}`)
+    if (normalizedEmail) {
+      channel.on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "task_invites",
+          filter: `to_email=eq.${normalizedEmail}`,
+        },
+        upsertInvite
+      )
+    }
+    channel.on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "task_invites",
+        filter: `from_user_id=eq.${currentUserId}`,
+      },
+      upsertInvite
+    )
+    channel.subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [currentUserEmail, currentUserId, isDbReady])
+
   const addInvite = useCallback(
     async (email) => {
       if (!isDbReady) return
@@ -387,14 +481,21 @@ export const TaskProvider = ({ children }) => {
         )
 
         if (invite.invite_type === "task" && invite.task_id) {
-          if (status === "accepted") {
-            await updateTaskInDb(invite.task_id, { assignment_status: "active" })
-          }
-          if (status === "declined") {
-            await updateTaskInDb(invite.task_id, {
-              assignment_status: "declined",
-              assigned_to_email: null,
-            })
+          try {
+            if (status === "accepted") {
+              const accepted = await acceptTaskAssignment(invite.task_id)
+              setTasks((current) =>
+                current.map((t) => (t.id === invite.task_id ? normalizeTask(accepted) : t))
+              )
+            }
+            if (status === "declined") {
+              const declined = await declineTaskAssignment(invite.task_id)
+              setTasks((current) =>
+                current.map((t) => (t.id === invite.task_id ? normalizeTask(declined) : t))
+              )
+            }
+          } catch (err) {
+            console.error("Failed to update task assignment status", err)
           }
         }
 
@@ -405,11 +506,11 @@ export const TaskProvider = ({ children }) => {
           actionLink: "/dashboard/collaboration",
           actionLabel: "Open collaboration",
         })
-      } catch {
-        // ignore
+      } catch (err) {
+        console.error("Failed to respond to invite", err)
       }
     },
-    [addNotification, isDbReady]
+    [addNotification, isDbReady, normalizeTask]
   )
 
   const addTask = useCallback(
@@ -422,6 +523,7 @@ export const TaskProvider = ({ children }) => {
       shared = false,
       status = "pending",
     }) => {
+      // Determine assignment status based on whether task is assigned to someone else
       const normalizedAssigned = assignedTo.trim()
       const assignmentStatus =
         normalizedAssigned && normalizedAssigned !== currentUserEmail ? "pending" : "active"
@@ -447,7 +549,9 @@ export const TaskProvider = ({ children }) => {
           if (!saved) throw new Error("Supabase task create returned empty result")
           setTasks((current) => [saved, ...current])
           logActivity(saved.id, "created", { title: saved.title })
-           if (
+          
+          // If task is assigned to someone else, create invite and send notification
+          if (
             normalizedAssigned &&
             normalizedAssigned !== currentUserEmail &&
             assignmentStatus === "pending"
@@ -464,21 +568,22 @@ export const TaskProvider = ({ children }) => {
               })
               setInvites((current) => [invite, ...current])
               
-              // Add notification for creator
-              addNotification({
-                title: "Task assignment sent",
-                message: `Assignment request sent to ${normalizedAssigned}.`,
+              // Notify creator
+              await addNotification({
+                title: "Task created and assigned",
+                message: `You created and assigned "${saved.title}" to ${normalizedAssigned}.`,
                 time: Date.now(),
-                actionLink: "/dashboard/collaboration",
-                actionLabel: "View invites",
+                taskId: saved.id,
+                actionLink: `/dashboard/tasks/${saved.id}`,
+                actionLabel: "View task",
               })
               
-              // Try to send email notification to assigned user
+              // Send email to assignee
               try {
                 await sendInviteEmail({
                   to: normalizedAssigned,
                   subject: `You've been assigned a task: ${saved.title}`,
-                  message: `A new task has been assigned to you: "${saved.title}". Please accept or decline the assignment.`,
+                  message: `A new task has been assigned to you: "${saved.title}". Priority: ${saved.priority}. Please accept or decline the assignment.`,
                 })
               } catch (emailError) {
                 console.warn("Email notification failed, but task was created", emailError)
@@ -488,25 +593,92 @@ export const TaskProvider = ({ children }) => {
             }
           }
           return saved
-        } catch {
+        } catch (err) {
           // fallback to local state
+          console.error("Failed to create task in DB", err)
         }
       }
 
       setTasks((current) => [newTask, ...current])
       logActivity(newTask.id, "created", { title: newTask.title })
+      
       if (newTask.assignedTo && newTask.assignedTo !== currentUserEmail) {
         addNotification({
           title: "Task assignment sent",
-          message: `Assignment request sent to ${newTask.assignedTo}.`,
+          message: `Task assigned to ${newTask.assignedTo}.`,
           time: Date.now(),
-          actionLink: "/dashboard/collaboration",
-          actionLabel: "View invites",
+          actionLink: "/dashboard/tasks",
+          actionLabel: "View tasks",
         })
       }
       return newTask
     },
     [addNotification, currentUserEmail, isDbReady, logActivity, normalizeTask]
+  )
+
+  // Separate function to assign an existing task to a user
+  const assignTaskToUser = useCallback(
+    async (taskId, toEmail) => {
+      if (!toEmail || !toEmail.trim()) return null
+      
+      const normalizedEmail = toEmail.trim()
+      const task = tasks.find((t) => t.id === taskId)
+      if (!task) return null
+
+      if (isDbReady) {
+        try {
+          const result = await assignTask({
+            taskId,
+            toEmail: normalizedEmail,
+            taskTitle: task.title,
+            taskDescription: task.description,
+            taskPriority: task.priority,
+            taskDeadline: task.deadline,
+          })
+          
+          // Update local task state with the assignment
+          const updated = normalizeTask(result.task)
+          setTasks((current) =>
+            current.map((t) => (t.id === taskId ? updated : t))
+          )
+          
+          // Add the invite to local state
+          setInvites((current) => [result.invite, ...current])
+          
+          // Log activity
+          logActivity(taskId, "assigned", { assignedTo: normalizedEmail })
+          
+          // Notify CREATOR that they assigned the task
+          await addNotification({
+            title: "Task assigned",
+            message: `You assigned "${task.title}" to ${normalizedEmail}.`,
+            time: Date.now(),
+            taskId: taskId,
+            actionLink: `/dashboard/tasks/${taskId}`,
+            actionLabel: "View task",
+          })
+          
+          // Send email to assignee with assignment details
+          try {
+            await sendInviteEmail({
+              to: normalizedEmail,
+              subject: `You've been assigned a task: ${task.title}`,
+              message: `A new task has been assigned to you: "${task.title}". Priority: ${task.priority}. Please accept or decline the assignment.`,
+            })
+          } catch (emailError) {
+            console.warn("Email notification failed, but task was assigned", emailError)
+          }
+          
+          return updated
+        } catch (err) {
+          console.error("Failed to assign task", err)
+          throw err
+        }
+      }
+      
+      return null
+    },
+    [tasks, isDbReady, logActivity, addNotification]
   )
 
   const updateTask = useCallback(
@@ -515,13 +687,39 @@ export const TaskProvider = ({ children }) => {
       const dbUpdates = { ...updates }
       if (dbUpdates.attachments) delete dbUpdates.attachments
 
-      const normalizedAssigned = updates?.assignedTo?.trim?.() ?? updates?.assignedTo
-      if (typeof normalizedAssigned === "string") {
-        dbUpdates.assignedTo = normalizedAssigned
-        dbUpdates.assignmentStatus =
-          normalizedAssigned && normalizedAssigned !== currentUserEmail ? "pending" : "active"
+      // Handle assignment change separately using assignTaskToUser
+      const newAssignedTo = updates?.assignedTo?.trim?.() ?? updates?.assignedTo
+      const task = tasks.find((t) => t.id === id)
+      const previousAssignedTo = (task?.assignedTo || task?.assigned_to_email || "").trim()
+      
+      // If assignedTo changed, use the dedicated assignment function
+      if (newAssignedTo && newAssignedTo !== previousAssignedTo && newAssignedTo !== currentUserEmail) {
+        delete dbUpdates.assignedTo
+        delete dbUpdates.assignmentStatus
+        
+        // First update other fields
+        if (Object.keys(dbUpdates).length > 0) {
+          if (isDbReady) {
+            try {
+              await updateTaskInDb(id, dbUpdates)
+            } catch (err) {
+              console.error("Failed to update task fields", err)
+            }
+          }
+        }
+        
+        // Then handle the assignment
+        try {
+          await assignTaskToUser(id, newAssignedTo)
+          logActivity(id, "updated", { fields: Object.keys(dbUpdates || {}) })
+          return
+        } catch (err) {
+          console.error("Failed to assign task", err)
+          return
+        }
       }
 
+      // For non-assignment updates
       if (isDbReady) {
         try {
           const updated = normalizeTask(await updateTaskInDb(id, dbUpdates))
@@ -532,6 +730,7 @@ export const TaskProvider = ({ children }) => {
             current.map((task) => (task.id === id ? merged : task))
           )
           logActivity(id, "updated", { fields: Object.keys(dbUpdates || {}) })
+          
           const previous = tasks.find((t) => t.id === id)
           if (
             previous &&
@@ -552,74 +751,20 @@ export const TaskProvider = ({ children }) => {
               actionLabel: "Open task",
             })
           }
-          if (
-            normalizedAssigned &&
-            normalizedAssigned !== currentUserEmail &&
-            dbUpdates.assignmentStatus === "pending"
-          ) {
-            try {
-              const invite = await createInvite({
-                toEmail: normalizedAssigned,
-                inviteType: "task",
-                taskId: id,
-                taskTitle: updated?.title,
-                taskDescription: updated?.description,
-                taskPriority: updated?.priority,
-                taskDeadline: updated?.deadline,
-              })
-              setInvites((current) => [invite, ...current])
-              
-              addNotification({
-                title: "Task assignment sent",
-                message: `Assignment request sent to ${normalizedAssigned}.`,
-                time: Date.now(),
-                actionLink: "/dashboard/collaboration",
-                actionLabel: "View invites",
-              })
-              
-              // Send email to assigned user
-              try {
-                await sendInviteEmail({
-                  to: normalizedAssigned,
-                  subject: `You've been assigned a task: ${updated?.title}`,
-                  message: `A task has been assigned to you: "${updated?.title}". Please accept or decline the assignment.`,
-                })
-              } catch (emailError) {
-                console.warn("Email notification failed, but invite was created", emailError)
-              }
-            } catch (err) {
-              console.error("Failed to create invite", err)
-            }
-          }
           return merged
-        } catch {
-          // fallback to local update
+        } catch (err) {
+          console.error("Failed to update task", err)
         }
       }
 
       setTasks((current) =>
-        current.map((task) => (task.id === id ? { ...task, ...updates } : task))
+        current.map((task) => (task.id === id ? { ...task, ...dbUpdates } : task))
       )
-      const task = tasks.find((t) => t.id === id)
-      if (task) {
-        logActivity(id, "updated", { fields: Object.keys(updates || {}) })
-        if (
-          updates.assignedTo &&
-          updates.assignedTo !== task.assignedTo &&
-          updates.assignedTo !== currentUserEmail
-        ) {
-          addNotification({
-            title: "Task assignment sent",
-            message: `Assignment request sent to ${updates.assignedTo}.`,
-            time: Date.now(),
-            actionLink: "/dashboard/collaboration",
-            actionLabel: "View invites",
-          })
-        }
-      }
+      logActivity(id, "updated", { fields: Object.keys(dbUpdates || {}) })
     },
     [
       addNotification,
+      assignTaskToUser,
       currentUserEmail,
       currentUserId,
       isDbReady,
@@ -771,6 +916,7 @@ export const TaskProvider = ({ children }) => {
       currentUserName,
       isDbReady,
       addTask,
+      assignTaskToUser,
       updateTask,
       toggleTaskComplete,
       deleteTask,
@@ -794,6 +940,7 @@ export const TaskProvider = ({ children }) => {
       currentUserName,
       isDbReady,
       addTask,
+      assignTaskToUser,
       updateTask,
       toggleTaskComplete,
       deleteTask,

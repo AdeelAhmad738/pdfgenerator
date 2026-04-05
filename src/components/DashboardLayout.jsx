@@ -83,12 +83,6 @@ const DashboardLayout = () => {
       label: "Profile",
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21c0-4.4-3.6-8-8-8s-8 3.6-8 8"/><circle cx="12" cy="7" r="4"/></svg>,
     },
-    {
-      action: handleSignOut,
-      label: "Sign Out",
-      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>,
-      isSignOut: true,
-    },
   ]
 
   const renderLink = (link) => {
@@ -141,6 +135,23 @@ const DashboardLayout = () => {
           <div className="sidebar__divider"></div>
           <div className="sidebar__section-title">Workspace</div>
           <nav className="sidebar__nav">{workspaceLinks.map(renderLink)}</nav>
+          <div className="sidebar__footer">
+            <button
+              className="sidebar__link sidebar__link--signout"
+              onClick={() => {
+                handleSignOut()
+                setMobileMenuOpen(false)
+              }}
+              type="button"
+            >
+              <span className="sidebar__link-content">
+                <span className="sidebar__link-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+                </span>
+                <span>Sign Out</span>
+              </span>
+            </button>
+          </div>
         </Sidebar>
         {mobileMenuOpen && <div className="layout__overlay" onClick={() => setMobileMenuOpen(false)}></div>}
         <main className="main">

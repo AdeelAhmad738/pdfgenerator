@@ -30,25 +30,49 @@ const typeIcon = (title = "") => {
 
 function Notifications() {
   const navigate = useNavigate()
-  const { notifications, invites, currentUserEmail, markAllNotificationsRead, markNotificationRead } = useTasks()
+  const {
+    notifications,
+    invites,
+    currentUserEmail,
+    currentUserId,
+    markAllNotificationsRead,
+    markNotificationRead,
+    respondToInvite,
+    removeInvite,
+  } = useTasks()
   const [filter, setFilter] = useState("all") // all | unread
+  const [processingInviteId, setProcessingInviteId] = useState(null)
 
   const sorted = useMemo(() => {
     const email = (currentUserEmail || "").toLowerCase()
     const inviteNotes = invites
       .filter((i) => (i.to_email || i.email || "").toLowerCase() === email)
-      .map((i) => ({
-        id: `invite-${i.id}`,
-        title: i.invite_type === "task" ? "Task assignment invite" : "Collaboration invite",
-        message: `From ${i.from_email || "Teammate"} · ${i.status}`,
-        time: new Date(i.created_at).getTime(),
-        read: i.status !== "pending",
-        action_link: "/dashboard/collaboration",
-        action_label: "Open collaboration",
-      }))
+      .map((invite) => {
+        const link =
+          invite.invite_type === "task" && invite.task_id
+            ? `/dashboard/tasks/${invite.task_id}`
+            : "/dashboard/collaboration"
+        const label = invite.invite_type === "task" ? "Open task" : "Open collaboration"
+        return {
+          id: `invite-${invite.id}`,
+          type: "invite",
+          invite,
+          title:
+            invite.invite_type === "task"
+              ? `Task assignment invite · ${invite.task_title || "Untitled task"}`
+              : "Collaboration invite",
+          message: `From ${invite.from_email || "Teammate"} · ${invite.status}`,
+          time: new Date(invite.created_at).getTime(),
+          read: invite.status !== "pending",
+          action_link: link,
+          action_label: label,
+          isRecipient: true,
+          isSender: invite.from_user_id === currentUserId,
+        }
+      })
 
     return [...notifications, ...inviteNotes].sort((a, b) => b.time - a.time)
-  }, [notifications, invites, currentUserEmail])
+  }, [notifications, invites, currentUserEmail, currentUserId])
 
   const filtered = filter === "unread" ? sorted.filter((n) => !n.read) : sorted
 
@@ -56,12 +80,32 @@ function Notifications() {
   const earlierItems = filtered.filter((n) => !isToday(n.time))
   const unreadCount = sorted.filter((n) => !n.read).length
 
+  const handleInviteResponse = async (invite, status) => {
+    if (!invite) return
+    setProcessingInviteId(invite.id)
+    try {
+      await respondToInvite(invite, status)
+    } finally {
+      setProcessingInviteId(null)
+    }
+  }
+
+  const handleCancelInvite = async (inviteId) => {
+    if (!inviteId) return
+    setProcessingInviteId(inviteId)
+    try {
+      await removeInvite(inviteId)
+    } finally {
+      setProcessingInviteId(null)
+    }
+  }
+
   const renderNote = (note) => (
     <div
       key={note.id}
       className={`notification-item ${note.read ? "notification-item--read" : "notification-item--unread"}`}
     >
-      <div className="notification-item__icon">{typeIcon(note.title)}</div>
+      <div className="notification-item__icon">{typeIcon(note.title, note.message)}</div>
       <div className="notification-item__body">
         <div className="notification-item__header">
           <span className="notification-item__title">{note.title}</span>
@@ -74,7 +118,41 @@ function Notifications() {
               {note.action_label || "Open"}
             </button>
           )}
-          {!note.read && (
+          {note.type === "invite" && note.invite && (
+            <>
+              {note.invite.status === "pending" && note.isRecipient && (
+                <>
+                  <button
+                    className="button button--small button--primary"
+                    type="button"
+                    onClick={() => handleInviteResponse(note.invite, "accepted")}
+                    disabled={processingInviteId === note.invite.id}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    className="button button--small button--ghost"
+                    type="button"
+                    onClick={() => handleInviteResponse(note.invite, "declined")}
+                    disabled={processingInviteId === note.invite.id}
+                  >
+                    Decline
+                  </button>
+                </>
+              )}
+              {note.invite.status === "pending" && note.isSender && (
+                <button
+                  className="link-button link-button--danger"
+                  type="button"
+                  onClick={() => handleCancelInvite(note.invite.id)}
+                  disabled={processingInviteId === note.invite.id}
+                >
+                  Cancel invite
+                </button>
+              )}
+            </>
+          )}
+          {note.type !== "invite" && !note.read && (
             <button
               className="link-button"
               type="button"

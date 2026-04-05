@@ -14,7 +14,7 @@ export default function CreateTask() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
-  // Teammate suggestions
+  // Teammate suggestions from existing tasks
   const assigneeSuggestions = useMemo(() => {
     const emails = new Set()
     tasks.forEach((task) => {

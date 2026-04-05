@@ -36,6 +36,46 @@ before update on tasks
 for each row
 execute function set_updated_at();
 
+-- Trigger to notify assignee when task is assigned
+create or replace function notify_on_task_assignment()
+returns trigger as $$
+declare
+  assignee_id uuid;
+begin
+  -- Only trigger if assigned_to_email changed and is not null
+  if (old.assigned_to_email is distinct from new.assigned_to_email) and new.assigned_to_email is not null then
+    -- Find the user ID by email - search in auth.users
+    select id into assignee_id from auth.users where email = new.assigned_to_email limit 1;
+    
+    -- Create notification if user found
+    if assignee_id is not null then
+      insert into task_notifications (user_id, title, message, action_link, action_label, task_id, time, read)
+      values (
+        assignee_id,
+        'Task assigned to you',
+        'You have been assigned: ' || new.title,
+        '/dashboard/tasks/' || new.id,
+        'View task',
+        new.id,
+        now(),
+        false
+      );
+    end if;
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public, auth;
+
+create trigger task_assignment_notification
+after insert or update on tasks
+for each row
+when (
+  (old.assigned_to_email is distinct from new.assigned_to_email)
+  and new.assigned_to_email is not null
+  and new.assignment_status = 'pending'
+)
+execute function notify_on_task_assignment();
+
 -- Row level security (RLS) policy for tasks
 alter table tasks enable row level security;
 
@@ -171,6 +211,36 @@ alter table task_drafts enable row level security;
 alter table task_notifications enable row level security;
 alter table task_attachments enable row level security;
 alter table task_activity enable row level security;
+
+-- Aggregated views to power Team Tasks + Collaboration insights
+create view if not exists collaborator_assignments_view as
+select
+  lower(assigned_to_email) as assigned_to_email,
+  lower(created_by_email) as owner_email,
+  coalesce(max(updated_at), max(created_at)) as last_updated,
+  count(*) as task_count
+from tasks
+where assigned_to_email is not null
+group by lower(assigned_to_email), lower(created_by_email);
+
+create view if not exists team_workload_view as
+select
+  user_id,
+  lower(assigned_to_email) as assignee,
+  sum(case when assignment_status = 'active' then 1 else 0 end) as active_tasks,
+  sum(case when deadline < now() and assignment_status = 'active' then 1 else 0 end) as overdue_tasks
+from tasks
+where assigned_to_email is not null
+group by user_id, lower(assigned_to_email);
+
+alter view collaborator_assignments_view enable row level security;
+alter view team_workload_view enable row level security;
+
+create policy "Collaborators view own assignments" on collaborator_assignments_view
+  for select using ((auth.jwt() ->> 'email') = assigned_to_email);
+
+create policy "Team workload access" on team_workload_view
+  for select using (auth.uid() = user_id);
 
 create policy "User templates read" on task_templates
   for select using (auth.uid() = user_id or shared = true);

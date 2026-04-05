@@ -183,13 +183,15 @@ export const createInvite = async (payloadOrEmail) => {
       : payloadOrEmail || {}
 
   const toEmail = payload.toEmail || payload.email
+  const cleanedEmail = (toEmail || "").trim()
+  const normalizedEmail = cleanedEmail.toLowerCase()
 
   const insertPayload = {
     user_id: user.id,
     from_user_id: user.id,
     from_email: user.email || null,
-    email: toEmail,
-    to_email: toEmail,
+    email: cleanedEmail || null,
+    to_email: normalizedEmail || null,
     invite_type: payload.inviteType || "collaboration",
     task_id: payload.taskId || null,
     task_title: payload.taskTitle || null,
@@ -439,6 +441,97 @@ export const createActivity = async ({ taskId, action, details = {} }) => {
     .insert([payload])
     .select()
     .single()
+  if (error) throw error
+  return data
+}
+
+/**
+ * Assign a task to a user (create assignment invite)
+ * This is separate from task creation to allow flexibility
+ */
+export const assignTask = async ({ taskId, toEmail, taskTitle, taskDescription, taskPriority, taskDeadline }) => {
+  const user = await getCurrentUser()
+  if (!user?.id) return null
+
+  // Create the invite for the assignment
+  const invite = await createInvite({
+    toEmail,
+    inviteType: "task",
+    taskId,
+    taskTitle,
+    taskDescription,
+    taskPriority,
+    taskDeadline,
+  })
+
+  // Update the task with the assigned email and set status to pending
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      assigned_to_email: toEmail,
+      assignment_status: "pending",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return { task: data, invite }
+}
+
+/**
+ * Accept a task assignment
+ */
+export const acceptTaskAssignment = async (taskId) => {
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      assignment_status: "active",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Decline a task assignment
+ */
+export const declineTaskAssignment = async (taskId) => {
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      assignment_status: "declined",
+      assigned_to_email: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Unassign a task (revert assignment)
+ */
+export const unassignTask = async (taskId) => {
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      assigned_to_email: null,
+      assignment_status: "active",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId)
+    .select()
+    .single()
+
   if (error) throw error
   return data
 }

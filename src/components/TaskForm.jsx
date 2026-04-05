@@ -105,7 +105,7 @@ const TaskForm = ({
       </div>
 
       <div className="form-group">
-        <label htmlFor="task-assigned">Assigned to</label>
+        <label htmlFor="task-assigned">Assign to (optional)</label>
         <input
           id="task-assigned"
           type="text"

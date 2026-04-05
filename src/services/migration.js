@@ -19,9 +19,16 @@ const safeJson = (value, fallback) => {
 export const migrateLocalDataOnce = async () => {
   if (localStorage.getItem("task_manager_migrated") === "true") return
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user = null
+  try {
+    const {
+      data: { user: fetchedUser },
+    } = await supabase.auth.getUser()
+    user = fetchedUser
+  } catch (error) {
+    console.warn("[migration] Unable to read auth user", error?.message || error)
+    return
+  }
 
   if (!user?.id) return
 

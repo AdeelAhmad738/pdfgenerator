@@ -1,194 +1,214 @@
-import React, { useState } from "react"
-import { useTasks } from "../../context/TaskContext"
+import { useState } from "react"
+import { useNavigate } from "react-router-dom"
+import { DEFAULT_PREFERENCES, useTasks } from "../../context/TaskContext"
+
+const SettingToggle = ({ icon, label, description, value, onChange }) => (
+  <div className="setting-item">
+    <div className="setting-info">
+      <span className="setting-icon">{icon}</span>
+      <div>
+        <h4>{label}</h4>
+        <p className="small-text">{description}</p>
+      </div>
+    </div>
+    <div
+      className={`settings-switch ${value ? "settings-switch--on" : ""}`}
+      role="switch"
+      tabIndex={0}
+      aria-checked={Boolean(value)}
+      onClick={() => onChange(!value)}
+      onKeyDown={(e) => {
+        if (e.key === " " || e.key === "Enter") {
+          onChange(!value)
+        }
+      }}
+    >
+      <span className="settings-switch__thumb" />
+    </div>
+  </div>
+)
+
+const SettingAction = ({ label, description, actionLabel, onClick }) => (
+  <div className="setting-action">
+    <div>
+      <h4>{label}</h4>
+      <p className="small-text">{description}</p>
+    </div>
+    <button type="button" className="button button--ghost button--small" onClick={onClick}>
+      {actionLabel}
+    </button>
+  </div>
+)
 
 const Settings = () => {
+  const navigate = useNavigate()
   const { preferences, updatePreference, currentUserEmail } = useTasks()
+  const [statusMessage, setStatusMessage] = useState("")
   const [copied, setCopied] = useState(false)
 
   const handleCopyEmail = () => {
+    if (!currentUserEmail) return
     navigator.clipboard.writeText(currentUserEmail)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+    setStatusMessage("Email copied to clipboard")
   }
 
-  const SettingToggle = ({ icon, label, description, value, onChange }) => (
-    <div className="setting-item">
-      <div className="setting-info">
-        <span className="setting-icon">{icon}</span>
-        <div>
-          <h4>{label}</h4>
-          <p className="small-text">{description}</p>
-        </div>
-      </div>
-      <div
-        className={`settings-switch ${value ? "settings-switch--on" : ""}`}
-        onClick={() => onChange(!value)}
-        role="switch"
-        aria-checked={value}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === " " || e.key === "Enter") onChange(!value)
-        }}
-      >
-        <span className="settings-switch__thumb" />
-      </div>
-    </div>
-  )
+  const handleResetPreferences = () => {
+    Object.entries(DEFAULT_PREFERENCES).forEach(([key, value]) => {
+      updatePreference(key, value)
+    })
+    setStatusMessage("Preferences reset to defaults")
+  }
+
+  const handleClearCache = () => {
+    if (typeof localStorage === "undefined") return
+    Object.keys(localStorage).forEach((key) => {
+      if (key.startsWith("task_manager_")) {
+        localStorage.removeItem(key)
+      }
+    })
+    setStatusMessage("Local cache cleared")
+  }
+
+  const handleRequestExport = () => {
+    setStatusMessage("Export queued — watch your inbox")
+  }
 
   return (
     <div className="page-content">
       <div className="page-header">
         <div>
           <h1>Settings</h1>
-          <p className="small-text">Manage your preferences and account settings.</p>
+          <p className="small-text">Simplify your workspace preferences.</p>
         </div>
+        {statusMessage && <span className="status-chip is-active">{statusMessage}</span>}
       </div>
 
-      <div className="settings-grid">
-        {/* ACCOUNT SECTION */}
+      <div className="settings-grid settings-grid--wide">
         <section className="dashboard__panel settings-section">
           <div className="settings-section__header">
-            <h3>Account</h3>
-            <p className="small-text">Your account information</p>
+            <h3>Account & security</h3>
+            <p className="small-text">Account controls + quick actions</p>
           </div>
           <div className="settings-section__body">
             <div className="setting-item setting-item--display">
               <div className="setting-info">
                 <span className="setting-icon">👤</span>
                 <div>
-                  <h4>Email Address</h4>
-                  <p className="setting-value">{currentUserEmail}</p>
+                  <h4>Email address</h4>
+                  <p className="setting-value">{currentUserEmail || "No email provided"}</p>
                 </div>
               </div>
-              <button className="button button--small" onClick={handleCopyEmail}>
-                {copied ? "Copied!" : "Copy"}
-              </button>
+              <div className="setting-item__actions">
+                <button className="button button--small" onClick={handleCopyEmail}>
+                  {copied ? "Copied!" : "Copy"}
+                </button>
+                <button className="button button--ghost button--small" onClick={() => navigate("/dashboard/profile")}>
+                  Profile
+                </button>
+              </div>
             </div>
+            <SettingAction
+              label="Security center"
+              description="Change your password or refresh workspace access."
+              actionLabel="Update password"
+              onClick={() => navigate("/update-password")}
+            />
           </div>
         </section>
 
-        {/* TASK PREFERENCES */}
         <section className="dashboard__panel settings-section">
           <div className="settings-section__header">
-            <h3>Task Preferences</h3>
-            <p className="small-text">How tasks should behave</p>
+            <h3>Task automation</h3>
+            <p className="small-text">Automate routine task behavior</p>
           </div>
           <div className="settings-section__body">
             <SettingToggle
-              icon="✓"
-              label="Confirm Delete"
-              description="Ask before deleting tasks"
-              value={preferences.confirmDelete}
-              onChange={(val) => updatePreference("confirmDelete", val)}
-            />
-            <SettingToggle
-              icon="🎯"
-              label="Auto-assign Deadlines"
-              description="Suggest due date when creating tasks"
-              value={preferences.autoAssignDueDates}
+              icon="🧠"
+              label="Auto-assign deadlines"
+              description="Suggest due dates while creating tasks"
+              value={preferences?.autoAssignDueDates}
               onChange={(val) => updatePreference("autoAssignDueDates", val)}
             />
             <SettingToggle
-              icon="👁️"
-              label="Show Completed Tasks"
-              description="Display finished tasks in list view"
-              value={preferences.showCompletedTasks}
-              onChange={(val) => updatePreference("showCompletedTasks", val)}
+              icon="💾"
+              label="Auto-restore drafts"
+              description="Bring back unfinished drafts so you can resume faster"
+              value={preferences?.autoRestoreDrafts}
+              onChange={(val) => updatePreference("autoRestoreDrafts", val)}
+            />
+            <SettingToggle
+              icon="⚠️"
+              label="Confirm deletions"
+              description="Require confirmation before removing tasks or drafts"
+              value={preferences?.confirmDelete}
+              onChange={(val) => updatePreference("confirmDelete", val)}
+            />
+            <SettingToggle
+              icon="🧹"
+              label="Prevent duplicates"
+              description="Warn when a task with the same title exists"
+              value={preferences?.preventDuplicateTasks}
+              onChange={(val) => updatePreference("preventDuplicateTasks", val)}
             />
           </div>
         </section>
 
-        {/* NOTIFICATIONS */}
         <section className="dashboard__panel settings-section">
           <div className="settings-section__header">
             <h3>Notifications</h3>
-            <p className="small-text">When to notify you</p>
+            <p className="small-text">Choose what updates reach you</p>
           </div>
           <div className="settings-section__body">
             <SettingToggle
               icon="📬"
-              label="Task Assignments"
-              description="Notify when assigned a task"
-              value={preferences.notifyOnAssign}
+              label="Task assignments"
+              description="Notify when you're assigned a task"
+              value={preferences?.notifyOnAssign}
               onChange={(val) => updatePreference("notifyOnAssign", val)}
             />
             <SettingToggle
               icon="⏰"
-              label="Deadline Reminders"
-              description="Remind before task deadline"
-              value={preferences.notifyOnDeadline}
+              label="Deadline reminders"
+              description="Remind you before deadlines"
+              value={preferences?.notifyOnDeadline}
               onChange={(val) => updatePreference("notifyOnDeadline", val)}
             />
             <SettingToggle
               icon="💬"
-              label="Comments"
-              description="Notify on task comments"
-              value={preferences.notifyOnComments}
+              label="Comment alerts"
+              description="Alert on new comments from collaborators"
+              value={preferences?.notifyOnComments}
               onChange={(val) => updatePreference("notifyOnComments", val)}
             />
           </div>
         </section>
 
-        {/* APPEARANCE */}
         <section className="dashboard__panel settings-section">
           <div className="settings-section__header">
-            <h3>Appearance</h3>
-            <p className="small-text">Visual preferences</p>
+            <h3>Workspace hygiene</h3>
+            <p className="small-text">Clean, export, or reset cached data</p>
           </div>
           <div className="settings-section__body">
-            <SettingToggle
-              icon="📦"
-              label="Compact View"
-              description="Reduce spacing and padding"
-              value={preferences.compactView}
-              onChange={(val) => updatePreference("compactView", val)}
+            <SettingAction
+              label="Reset preferences"
+              description="Return all toggles to their defaults"
+              actionLabel="Reset"
+              onClick={handleResetPreferences}
             />
-          </div>
-        </section>
-
-        {/* PRIVACY & TEAM */}
-        <section className="dashboard__panel settings-section">
-          <div className="settings-section__header">
-            <h3>Collaboration</h3>
-            <p className="small-text">Team visibility settings</p>
-          </div>
-          <div className="settings-section__body">
-            <SettingToggle
-              icon="👥"
-              label="Team Visibility"
-              description="Allow team to see your profile"
-              value={preferences.enableTeamVisibility}
-              onChange={(val) => updatePreference("enableTeamVisibility", val)}
+            <SettingAction
+              label="Clear cached data"
+              description="Remove drafts, cached tasks, and preferences stored locally"
+              actionLabel="Clear cache"
+              onClick={handleClearCache}
             />
-            <SettingToggle
-              icon="📊"
-              label="Share Stats"
-              description="Show productivity stats to team"
-              value={preferences.showProductivityStats}
-              onChange={(val) => updatePreference("showProductivityStats", val)}
+            <SettingAction
+              label="Export workspace"
+              description="Request a ZIP with tasks, attachments, and history"
+              actionLabel="Request export"
+              onClick={handleRequestExport}
             />
-          </div>
-        </section>
-
-        {/* ABOUT */}
-        <section className="dashboard__panel settings-section">
-          <div className="settings-section__header">
-            <h3>About</h3>
-            <p className="small-text">App information</p>
-          </div>
-          <div className="settings-section__body">
-            <div className="about-item">
-              <span>Version</span>
-              <strong>1.0.0</strong>
-            </div>
-            <div className="about-item">
-              <span>Database</span>
-              <strong>Supabase</strong>
-            </div>
-            <div className="about-item">
-              <span>Last Updated</span>
-              <strong>{new Date().toLocaleDateString()}</strong>
-            </div>
           </div>
         </section>
       </div>

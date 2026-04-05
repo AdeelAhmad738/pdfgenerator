@@ -8,11 +8,16 @@ const ProtectedRoute = ({ children, redirectPath = "/" }) => {
 
   useEffect(() => {
     const checkSession = async () => {
-      const { data, error } = await supabase.auth.getSession()
-      if (!error && data?.session) {
-        setIsAuthenticated(true)
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (!error && data?.session) {
+          setIsAuthenticated(true)
+        }
+      } catch (err) {
+        console.warn("[ProtectedRoute] supabase.auth.getSession failed", err?.message || err)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
 
     checkSession()

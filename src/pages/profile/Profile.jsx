@@ -1,159 +1,117 @@
-import { useState, useMemo, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { supabase } from "../../services/supabaseClient"
 import { useTasks } from "../../context/TaskContext"
 
+const normalizeStatus = (status) => {
+  if (!status) return "pending"
+  if (status === "complete") return "completed"
+  return status.toLowerCase()
+}
+
+const formatDate = (value) => {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleDateString()
+}
+
+const DAY_MS = 86400000
+
 function Profile() {
   const navigate = useNavigate()
-  const { tasks, currentUserEmail } = useTasks()
-
+  const { tasks, currentUserEmail, invites } = useTasks()
   const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [name, setName] = useState("")
-  const [avatar, setAvatar] = useState("")
+  const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
-  const [newPassword, setNewPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
-  const [showPasswordChange, setShowPasswordChange] = useState(false)
 
-  /* USER TASKS ANALYTICS */
+  const safeTasks = Array.isArray(tasks) ? tasks : []
+  const normalizedEmail = (currentUserEmail || "").toLowerCase()
+
   const userTasks = useMemo(() => {
-    const safeTasks = Array.isArray(tasks) ? tasks : []
+    if (!normalizedEmail) return []
     return safeTasks.filter(
-      (t) => (t.assignedTo || t.assigned_to_email) === currentUserEmail
+      (task) =>
+        (task.assignedTo || task.assigned_to_email || "").toLowerCase() === normalizedEmail
     )
-  }, [tasks, currentUserEmail])
+  }, [safeTasks, normalizedEmail])
+
+  const teamMembers = useMemo(() => {
+    const map = new Map()
+    userTasks.forEach((task) => {
+      const ownerEmail = (task.createdByEmail || task.created_by_email || "").toLowerCase().trim()
+      if (!ownerEmail || ownerEmail === normalizedEmail) return
+      const entry = map.get(ownerEmail) || { email: ownerEmail, tasks: [], lastAssigned: 0 }
+      entry.displayName = entry.displayName || task.createdByEmail || task.created_by_email || ownerEmail
+      entry.tasks.push(task)
+      const updatedAt = new Date(task.updatedAt || task.updated_at || task.createdAt || task.created_at || Date.now()).getTime()
+      entry.lastAssigned = Math.max(entry.lastAssigned, updatedAt)
+      map.set(ownerEmail, entry)
+    })
+    return Array.from(map.values()).sort((a, b) => b.tasks.length - a.tasks.length)
+  }, [userTasks, normalizedEmail])
 
   const stats = useMemo(() => {
-    const s = { 
-      total: userTasks.length, 
-      completed: 0, 
-      progress: 0, 
-      pending: 0, 
-      high: 0, 
-      medium: 0, 
-      low: 0,
-      overdue: 0 
-    }
-    
-    userTasks.forEach((t) => {
-      const taskStatus = t.status === "complete" ? "completed" : t.status
-      if (taskStatus === "completed") s.completed++
-      else if (taskStatus === "progress") s.progress++
-      else s.pending++
-      
-      const priority = t.priority || "medium"
-      if (priority === "high") s.high++
-      else if (priority === "medium") s.medium++
-      else s.low++
-      
-      if (t.deadline && new Date(t.deadline) < Date.now() && taskStatus !== "completed") {
-        s.overdue++
-      }
-    })
-    return s
+    const total = userTasks.length
+    const completed = userTasks.filter((task) => normalizeStatus(task.status) === "completed").length
+    const pending = userTasks.filter(
+      (task) => normalizeStatus(task.status) === "pending" || normalizeStatus(task.status) === "progress"
+    ).length
+    const overdue = userTasks.filter((task) => {
+      const deadline = task.deadline ? new Date(task.deadline).getTime() : null
+      return deadline && deadline < Date.now() && normalizeStatus(task.status) !== "completed"
+    }).length
+    const completionRate = total ? Math.round((completed / total) * 100) : 0
+    return { total, completed, pending, overdue, completionRate }
   }, [userTasks])
 
-  const completionRate = stats.total ? Math.round((stats.completed / stats.total) * 100) : 0
-  const activeTasks = userTasks.filter(t => t.status !== "completed").slice(0, 3)
+  const focusTasks = useMemo(() => {
+    return userTasks
+      .filter((task) => {
+        const deadline = task.deadline ? new Date(task.deadline).getTime() : null
+        return deadline && deadline >= Date.now() && deadline <= Date.now() + DAY_MS * 7
+      })
+      .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
+      .slice(0, 3)
+  }, [userTasks])
+
+  const pendingInvites = useMemo(() => invites.filter((invite) => invite.status === "pending"), [invites])
 
   useEffect(() => {
-    const loadProfile = async () => {
+    const loadUser = async () => {
       try {
         const { data } = await supabase.auth.getUser()
         const currentUser = data?.user
-
-        if (!currentUser) return
-
-        setUser(currentUser)
-        setName(currentUser.user_metadata?.full_name || "")
-        setAvatar(currentUser.user_metadata?.avatar || "")
+        if (currentUser) {
+          setUser(currentUser)
+          setName(currentUser.user_metadata?.full_name || "")
+        }
       } catch (err) {
-        setError("Failed to load profile")
+        setError("Unable to load your profile.")
       } finally {
         setLoading(false)
       }
     }
-
-    loadProfile()
+    loadUser()
   }, [])
 
-  const handleSaveProfile = async (e) => {
+  const handleSave = async (e) => {
     e.preventDefault()
-    setStatus("")
-    setError("")
-
-    try {
-      const { error } = await supabase.auth.updateUser({
-        data: { full_name: name, avatar }
-      })
-
-      if (error) throw error
-
-      setStatus("Profile updated successfully!")
-      setTimeout(() => setStatus(""), 3000)
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handleAvatarUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    try {
-      setError("")
-      const fileExt = file.name.split(".").pop()
-      const filePath = `${user.id}-${Date.now()}.${fileExt}`
-
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(filePath, file)
-
-      if (uploadError) throw uploadError
-
-      const { data } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(filePath)
-
-      setAvatar(data.publicUrl)
-      setStatus("Avatar updated successfully!")
-      setTimeout(() => setStatus(""), 3000)
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handlePasswordChange = async (e) => {
-    e.preventDefault()
-    setStatus("")
-    setError("")
-
-    if (newPassword !== confirmPassword) {
-      setError("New passwords don't match")
+    if (!name.trim()) {
+      setError("Name cannot be empty.")
       return
     }
-
-    if (newPassword.length < 6) {
-      setError("Password must be at least 6 characters long")
-      return
-    }
-
+    setStatus("")
+    setError("")
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword
-      })
-
+      const { error } = await supabase.auth.updateUser({ data: { full_name: name.trim() } })
       if (error) throw error
-
-      setStatus("Password updated successfully!")
-      setNewPassword("")
-      setConfirmPassword("")
-      setShowPasswordChange(false)
-      setTimeout(() => setStatus(""), 3000)
+      setStatus("Profile updated.")
+      setTimeout(() => setStatus(""), 2500)
     } catch (err) {
-      setError(err.message)
+      setError(err.message || "Failed to update profile.")
     }
   }
 
@@ -167,208 +125,122 @@ function Profile() {
     )
   }
 
+  const displayName = name || user?.user_metadata?.full_name || "Your name"
+  const email = user?.email || currentUserEmail || ""
+
   return (
     <div className="page-content">
       <div className="page-header">
-        <h1>My Profile</h1>
-        <p className="small-text">View your productivity and manage account settings.</p>
+        <h1>Team profile</h1>
+        <p className="small-text">
+          A simplified overview of your impact and teammates you collaborate with.
+        </p>
       </div>
 
       {status && <div className="alert alert--success">{status}</div>}
       {error && <div className="alert alert--error">{error}</div>}
 
-      <div className="profile-grid">
-        {/* PROFILE CARD */}
-        <section className="profile-card">
-          <div className="profile-avatar">
-            {avatar ? (
-              <img src={avatar} alt="Profile avatar" />
-            ) : (
-              <div className="avatar avatar--large">
-                {(user?.email || "U").slice(0, 2).toUpperCase()}
-              </div>
-            )}
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleAvatarUpload}
-              style={{ display: 'none' }}
-              id="avatar-upload"
-            />
-            <label htmlFor="avatar-upload" className="avatar-upload-btn">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14.828 14.828a4 4 0 0 1-5.656 0M9 10h1.586a1 1 0 0 1 .707.293l.707.707A1 1 0 0 0 13.414 11H15m-3-3v6"/>
-              </svg>
-            </label>
-          </div>
-
-          <h3>{name || "Your Name"}</h3>
-          <p>{user?.email}</p>
-
-          <div className="profile-meta">
-            <div>
-              <span>Total Tasks</span>
-              <strong>{stats.total}</strong>
-            </div>
-            <div>
-              <span>Completed</span>
-              <strong>{stats.completed}</strong>
-            </div>
-            <div>
-              <span>Success Rate</span>
-              <strong>{completionRate}%</strong>
-            </div>
-          </div>
-
-          <div className="profile-actions">
-            <button className="button button--primary" onClick={() => navigate("/dashboard/tasks")}>
-              View All Tasks
+      <section className="team-profile-hero">
+        <div>
+          <p className="small-text">You</p>
+          <h2>{displayName}</h2>
+          <p className="small-text">{email}</p>
+          <div className="team-profile-actions">
+            <button className="button" onClick={() => navigate("/dashboard/team")}>
+              View team tasks
             </button>
-            <button className="button button--ghost" onClick={() => navigate("/dashboard/create")}>
-              New Task
+            <button className="button button--ghost" onClick={() => navigate("/dashboard/collaboration")}>
+              Manage collaboration
             </button>
           </div>
-        </section>
-
-        {/* PRODUCTIVITY SUMMARY */}
-        <section className="dashboard__panel">
-          <h3>Productivity Summary</h3>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${completionRate}%` }} />
+        </div>
+        <div className="team-profile-stats">
+          <div>
+            <span className="small-text">Completion</span>
+            <strong>{stats.completionRate}%</strong>
           </div>
-          <div className="progress-breakdown">
-            <div className="progress-row">
-              <span>In Progress</span>
-              <strong>{stats.progress}</strong>
-            </div>
-            <div className="progress-row">
-              <span>Pending</span>
-              <strong>{stats.pending}</strong>
-            </div>
-            <div className="progress-row">
-              <span>Completed</span>
-              <strong>{stats.completed}</strong>
-            </div>
+          <div>
+            <span className="small-text">Total assigned</span>
+            <strong>{stats.total}</strong>
           </div>
-        </section>
-
-        {/* TASK PRIORITIES */}
-        <section className="dashboard__panel">
-          <h3>Task Priorities</h3>
-          <div className="priority-breakdown">
-            <div className="priority-item">
-              <span className="priority-label priority-label--high">High Priority</span>
-              <strong>{stats.high}</strong>
-            </div>
-            <div className="priority-item">
-              <span className="priority-label priority-label--medium">Medium Priority</span>
-              <strong>{stats.medium}</strong>
-            </div>
-            <div className="priority-item">
-              <span className="priority-label priority-label--low">Low Priority</span>
-              <strong>{stats.low}</strong>
-            </div>
+          <div>
+            <span className="small-text">Invites</span>
+            <strong>{pendingInvites.length}</strong>
           </div>
-          {stats.overdue > 0 && (
-            <div className="alert alert--warning" style={{ marginTop: '12px' }}>
-              ⚠ You have {stats.overdue} overdue task{stats.overdue !== 1 ? 's' : ''}
-            </div>
-          )}
-        </section>
+        </div>
+      </section>
 
-        {/* ACTIVE TASKS */}
-        {activeTasks.length > 0 && (
-          <section className="dashboard__panel">
-            <h3>Active Tasks</h3>
-            <div className="activity-list">
-              {activeTasks.map((t) => {
-                const taskStatus = t.status === "complete" ? "completed" : t.status
-                return (
-                  <div key={t.id} className="activity-item">
-                    <strong>{t.title}</strong>
-                    <div className="task-tags">
-                      <span className={`status-pill status-pill--${taskStatus}`}>
-                        {taskStatus}
-                      </span>
-                      <span className={`priority-pill priority-pill--${t.priority || 'medium'}`}>
-                        {t.priority || "medium"}
-                      </span>
-                    </div>
+      <section className="profile-stats-grid">
+        <article className="insight-card">
+          <span className="insight-label">Pending attention</span>
+          <strong>{stats.pending}</strong>
+          <p className="small-text">Waiting on you</p>
+        </article>
+        <article className="insight-card">
+          <span className="insight-label">Overdue</span>
+          <strong>{stats.overdue}</strong>
+          <p className="small-text">Needs priority</p>
+        </article>
+        <article className="insight-card">
+          <span className="insight-label">Completed</span>
+          <strong>{stats.completed}</strong>
+          <p className="small-text">Done items</p>
+        </article>
+      </section>
+
+      <section className="team-section">
+        <div className="panel-header">
+          <h3>Team view</h3>
+          <p className="small-text">See teammates who assign tasks to you.</p>
+        </div>
+        {teamMembers.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state__icon">🤝</div>
+            <p>No teammates have assigned you tasks yet.</p>
+            <p className="small-text">Hit "View team tasks" to invite collaborations.</p>
+          </div>
+        ) : (
+          <div className="team-member-list">
+            {teamMembers.map((member) => {
+              const lastAssigned =
+                member.lastAssigned === 0 ? "No updates" : formatDate(member.lastAssigned)
+              return (
+                <div key={member.email} className="team-member-card">
+                  <div>
+                    <strong>{member.displayName}</strong>
+                    <p className="small-text">{member.email}</p>
+                    <p className="small-text">Last assigned {lastAssigned}</p>
                   </div>
-                )
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* EDIT PROFILE */}
-        <section className="dashboard__panel">
-          <h3>Account Settings</h3>
-          <form onSubmit={handleSaveProfile} className="task-form">
-            <div className="form-group">
-              <label>Full Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter your full name"
-              />
-            </div>
-            <div className="form-group">
-              <label>Email Address</label>
-              <input type="email" value={user?.email || ""} disabled />
-              <small className="small-text">Email cannot be changed</small>
-            </div>
-            <button type="submit" className="button">
-              Save Changes
-            </button>
-          </form>
-        </section>
-
-        {/* SECURITY */}
-        <section className="dashboard__panel">
-          <div className="panel-header">
-            <h3>Security</h3>
-            <button
-              type="button"
-              className="button button--ghost button--small"
-              onClick={() => setShowPasswordChange(!showPasswordChange)}
-            >
-              {showPasswordChange ? 'Cancel' : 'Change Password'}
-            </button>
+                  <div className="team-member-info">
+                    <span>{member.tasks.length} task{member.tasks.length !== 1 ? "s" : ""}</span>
+                    <button className="link-button" onClick={() => navigate("/dashboard/team-tasks")}>
+                      View tasks
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
+        )}
+      </section>
 
-          {showPasswordChange && (
-            <form onSubmit={handlePasswordChange} className="task-form">
-              <div className="form-group">
-                <label>New Password</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  minLength="6"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Confirm New Password</label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Confirm new password"
-                  minLength="6"
-                  required
-                />
-              </div>
-              <button type="submit" className="button">
-                Update Password
-              </button>
-            </form>
-          )}
-        </section>
-      </div>
+      <section className="profile-account-card">
+        <h3>Account</h3>
+        <form onSubmit={handleSave} className="task-form">
+          <div className="form-group">
+            <label>Display name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Your name"
+            />
+          </div>
+          <button type="submit" className="button">
+            Save name
+          </button>
+        </form>
+      </section>
     </div>
   )
 }

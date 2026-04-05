@@ -4,6 +4,7 @@ import { useTasks } from "../../context/TaskContext"
 import TaskForm from "../../components/TaskForm"
 import TaskCard from "../../components/TaskCard"
 import CommentForm from "../../components/CommentForm"
+import AssignTaskForm from "../../components/AssignTaskForm"
 import { jsPDF } from "jspdf"
 import { DragDropContext, Draggable, Droppable } from "react-beautiful-dnd"
 import {
@@ -48,6 +49,7 @@ const MyTasks = () => {
   const [assignedFilter, setAssignedFilter] = useState("all")
   const [search, setSearch] = useState("")
   const [editingTask, setEditingTask] = useState(null)
+  const [assigningTask, setAssigningTask] = useState(null)
   const [priorityFilter, setPriorityFilter] = useState("all")
   const [dueFilter, setDueFilter] = useState("all")
   const [sortMode, setSortMode] = useState("manual")
@@ -243,11 +245,30 @@ const MyTasks = () => {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-
   const handleSaveEdit = (taskId, values) => {
     updateTask(taskId, values)
     setEditingTask(null)
   }
+
+  const handleAssignClick = (task) => {
+    setAssigningTask(task)
+  }
+
+  const handleAssignSuccess = () => {
+    setAssigningTask(null)
+  }
+
+  // Get list of emails from other tasks for suggestions
+  const teamEmailSuggestions = useMemo(() => {
+    const emails = new Set()
+    tasks.forEach((task) => {
+      if (task.assignedTo && task.assignedTo !== currentUserEmail) emails.add(task.assignedTo)
+      if (task.assigned_to_email && task.assigned_to_email !== currentUserEmail) emails.add(task.assigned_to_email)
+      if (task.createdByEmail && task.createdByEmail !== currentUserEmail) emails.add(task.createdByEmail)
+      if (task.created_by_email && task.created_by_email !== currentUserEmail) emails.add(task.created_by_email)
+    })
+    return Array.from(emails)
+  }, [tasks, currentUserEmail])
 
   const exportTaskPdf = (task, openInNewTab = false) => {
     const status = normalizeStatus(task.status)
@@ -366,10 +387,31 @@ const MyTasks = () => {
 
         <section className="dashboard__panel">
           <h3>Task Details</h3>
+          {assigningTask?.id === currentTask.id && (
+            <div style={{ marginBottom: "1.5rem", padding: "1rem", background: "rgba(59, 130, 246, 0.1)", borderRadius: "8px" }}>
+              <h4 style={{ margin: "0 0 1rem 0" }}>Assign Task</h4>
+              <AssignTaskForm
+                task={currentTask}
+                onAssignSuccess={handleAssignSuccess}
+                onCancel={() => setAssigningTask(null)}
+                suggestedEmails={teamEmailSuggestions}
+              />
+            </div>
+          )}
           <div className="task-details">
             <div className="task-details__row">
               <span className="task-details__label">Assigned To</span>
-              <span className="task-details__value">{currentTask.assignedTo || currentTask.assigned_to_email || "Unassigned"}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "space-between" }}>
+                <span className="task-details__value">{currentTask.assignedTo || currentTask.assigned_to_email || "Unassigned"}</span>
+                {currentTask.user_id === currentUserId && !assigningTask?.id && (
+                  <button
+                    className="button button--small button--ghost"
+                    onClick={() => handleAssignClick(currentTask)}
+                  >
+                    Change Assignment
+                  </button>
+                )}
+              </div>
             </div>
             <div className="task-details__row">
               <span className="task-details__label">Due Date</span>
@@ -758,6 +800,16 @@ const MyTasks = () => {
                                         title="Mark as Done"
                                       >
                                         ✓ Done
+                                      </button>
+                                    )}
+                                    {task.user_id === currentUserId && (
+                                      <button
+                                        type="button"
+                                        className="kanban-quick-btn"
+                                        onClick={(e) => { e.stopPropagation(); navigate(`/dashboard/tasks/${task.id}`) }}
+                                        title="Assign this task"
+                                      >
+                                        👤 Assign
                                       </button>
                                     )}
                                     <button
